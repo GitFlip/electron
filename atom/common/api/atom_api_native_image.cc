@@ -216,12 +216,41 @@ void Noop(char*, void*) {
 
 }  // namespace
 
+int64_t bmps64(const SkBitmap &bitmap)
+{
+  const SkImageInfo &bmpInfo = bitmap.info();
+  const int          bmpHeight = bmpInfo.height();
+  const int          bmpWidth = bmpInfo.width();
+  const int          bmpBPP = bmpInfo.bytesPerPixel();
+  const size_t       bmpRowBytes = bitmap.rowBytes();
+
+  if (bmpHeight == 0) return 0;
+
+  return sk_64_mul(bmpHeight - 1, bmpRowBytes) + sk_64_mul(bmpWidth, bmpBPP);
+}
+
+int64_t imgs64(const gfx::Image &image)
+{
+  const SkBitmap *ptrBmp = image.ToImageSkia()->bitmap();
+
+  return ptrBmp ? bmps64(*ptrBmp) : 0;
+}
+
+size_t bmpss(const SkBitmap &bitmap)
+{
+  int64_t size = bmps64(bitmap);
+  if (!sk_64_isS32(size)) {
+    return 0;
+  }
+  
+  return sk_64_asS32(size);
+}
+
 NativeImage::NativeImage(v8::Isolate* isolate, const gfx::Image& image)
     : image_(image) {
   Init(isolate);
   if (image_.HasRepresentation(gfx::Image::kImageRepSkia)) {
-    isolate->AdjustAmountOfExternalAllocatedMemory(
-      image_.ToImageSkia()->bitmap()->computeSize64());
+    isolate->AdjustAmountOfExternalAllocatedMemory(imgs64(image_));
   }
   MarkHighMemoryUsage();
 }
@@ -235,8 +264,7 @@ NativeImage::NativeImage(v8::Isolate* isolate, const base::FilePath& hicon_path)
   image_ = gfx::Image(image_skia);
   Init(isolate);
   if (image_.HasRepresentation(gfx::Image::kImageRepSkia)) {
-    isolate->AdjustAmountOfExternalAllocatedMemory(
-      image_.ToImageSkia()->bitmap()->computeSize64());
+    isolate->AdjustAmountOfExternalAllocatedMemory(imgs64(image_));
   }
   MarkHighMemoryUsage();
 }
@@ -244,8 +272,7 @@ NativeImage::NativeImage(v8::Isolate* isolate, const base::FilePath& hicon_path)
 
 NativeImage::~NativeImage() {
   if (image_.HasRepresentation(gfx::Image::kImageRepSkia)) {
-    isolate()->AdjustAmountOfExternalAllocatedMemory(
-      - image_.ToImageSkia()->bitmap()->computeSize64());
+    isolate()->AdjustAmountOfExternalAllocatedMemory(imgs64(image_));
   }
 }
 
@@ -302,7 +329,7 @@ v8::Local<v8::Value> NativeImage::ToBitmap(mate::Arguments* args) {
     return node::Buffer::New(args->isolate(), 0).ToLocalChecked();
   return node::Buffer::Copy(args->isolate(),
                             reinterpret_cast<const char*>(ref->pixels()),
-                            bitmap.getSafeSize()).ToLocalChecked();
+                            bmpss(bitmap)).ToLocalChecked();
 }
 
 v8::Local<v8::Value> NativeImage::ToJPEG(v8::Isolate* isolate, int quality) {
@@ -340,7 +367,7 @@ v8::Local<v8::Value> NativeImage::GetBitmap(mate::Arguments* args) {
     return node::Buffer::New(args->isolate(), 0).ToLocalChecked();
   return node::Buffer::New(args->isolate(),
                            reinterpret_cast<char*>(ref->pixels()),
-                           bitmap.getSafeSize(),
+                           bmpss(bitmap),
                            &Noop,
                            nullptr).ToLocalChecked();
 }
