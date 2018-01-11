@@ -214,9 +214,12 @@ bool ReadImageSkiaFromICO(gfx::ImageSkia* image, HICON icon) {
 void Noop(char*, void*) {
 }
 
-}  // namespace
-
-int64_t bmps64(const SkBitmap &bitmap)
+/**
+ *  Return the full size of the bitmap, in bytes.
+ *  Reimplementation of SkBitmap.computeSize64() which is not
+ *  always available.
+ */
+int64_t SkBitmapSize64(const SkBitmap &bitmap)
 {
   const SkImageInfo &bmpInfo = bitmap.info();
   const int          bmpHeight = bmpInfo.height();
@@ -229,16 +232,12 @@ int64_t bmps64(const SkBitmap &bitmap)
   return sk_64_mul(bmpHeight - 1, bmpRowBytes) + sk_64_mul(bmpWidth, bmpBPP);
 }
 
-int64_t imgs64(const gfx::Image &image)
+/**
+ *  Same as SkBitmapSize64 but fitted to size_t on Windows.
+ */
+size_t SkBitmapSize(const SkBitmap &bitmap)
 {
-  const SkBitmap *ptrBmp = image.ToImageSkia()->bitmap();
-
-  return ptrBmp ? bmps64(*ptrBmp) : 0;
-}
-
-size_t bmpss(const SkBitmap &bitmap)
-{
-  int64_t size = bmps64(bitmap);
+  int64_t size = SkBitmapSize64(bitmap);
   if (!sk_64_isS32(size)) {
     return 0;
   }
@@ -246,11 +245,23 @@ size_t bmpss(const SkBitmap &bitmap)
   return sk_64_asS32(size);
 }
 
+/**
+ *  Return the full size of the gfx::Image, in bytes.
+ */
+int64_t GfxImageSize64(const gfx::Image &image)
+{
+  const SkBitmap *ptrBmp = image.ToImageSkia()->bitmap();
+
+  return ptrBmp ? SkBitmapSize64(*ptrBmp) : 0;
+}
+
+}  // namespace
+
 NativeImage::NativeImage(v8::Isolate* isolate, const gfx::Image& image)
     : image_(image) {
   Init(isolate);
   if (image_.HasRepresentation(gfx::Image::kImageRepSkia)) {
-    isolate->AdjustAmountOfExternalAllocatedMemory(imgs64(image_));
+    isolate->AdjustAmountOfExternalAllocatedMemory(GfxImageSize64(image_));
   }
   MarkHighMemoryUsage();
 }
@@ -264,7 +275,7 @@ NativeImage::NativeImage(v8::Isolate* isolate, const base::FilePath& hicon_path)
   image_ = gfx::Image(image_skia);
   Init(isolate);
   if (image_.HasRepresentation(gfx::Image::kImageRepSkia)) {
-    isolate->AdjustAmountOfExternalAllocatedMemory(imgs64(image_));
+    isolate->AdjustAmountOfExternalAllocatedMemory(GfxImageSize64(image_));
   }
   MarkHighMemoryUsage();
 }
@@ -272,7 +283,7 @@ NativeImage::NativeImage(v8::Isolate* isolate, const base::FilePath& hicon_path)
 
 NativeImage::~NativeImage() {
   if (image_.HasRepresentation(gfx::Image::kImageRepSkia)) {
-    isolate()->AdjustAmountOfExternalAllocatedMemory(imgs64(image_));
+    isolate()->AdjustAmountOfExternalAllocatedMemory(GfxImageSize64(image_));
   }
 }
 
@@ -329,7 +340,7 @@ v8::Local<v8::Value> NativeImage::ToBitmap(mate::Arguments* args) {
     return node::Buffer::New(args->isolate(), 0).ToLocalChecked();
   return node::Buffer::Copy(args->isolate(),
                             reinterpret_cast<const char*>(ref->pixels()),
-                            bmpss(bitmap)).ToLocalChecked();
+                            SkBitmapSize(bitmap)).ToLocalChecked();
 }
 
 v8::Local<v8::Value> NativeImage::ToJPEG(v8::Isolate* isolate, int quality) {
@@ -367,7 +378,7 @@ v8::Local<v8::Value> NativeImage::GetBitmap(mate::Arguments* args) {
     return node::Buffer::New(args->isolate(), 0).ToLocalChecked();
   return node::Buffer::New(args->isolate(),
                            reinterpret_cast<char*>(ref->pixels()),
-                           bmpss(bitmap),
+                           SkBitmapSize(bitmap),
                            &Noop,
                            nullptr).ToLocalChecked();
 }
